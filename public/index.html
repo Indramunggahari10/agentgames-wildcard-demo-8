@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Round Scorer — Gatekeeper round scoring, by the published rules</title>
+<style>
+  :root { color-scheme: light; --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700; --line:#d0d7de; --bg:#f6f8fa; --unk:#6e7781; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0 auto; max-width: 880px; padding: 24px 16px 64px; color: #1f2328; }
+  h1 { font-size: 1.6em; margin-bottom: 4px; }
+  .sub { color: #57606a; margin-top: 0; }
+  .honest { border: 2px solid var(--warn); background: #fff8c5; padding: 12px 14px; border-radius: 8px; }
+  .honest b { color: var(--warn); }
+  .honest ul { margin: 8px 0 0; padding-left: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; font-size: 0.92em; vertical-align: top; }
+  th { background: var(--bg); }
+  .pts-pos { color: var(--ok); font-weight: 700; }
+  .pts-neg { color: var(--bad); font-weight: 700; }
+  .pts-unk { color: var(--unk); font-weight: 700; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 220px; padding: 8px; font: 0.85em ui-monospace, monospace; border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 8px 14px; margin: 4px 6px 4px 0; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; font-size: 0.95em; }
+  button.primary { background: #0969da; border-color: #0969da; color: #fff; font-weight: 600; }
+  button:hover { filter: brightness(0.96); }
+  .error { border: 2px solid var(--bad); background: #ffebe9; padding: 12px 14px; border-radius: 8px; margin: 12px 0; white-space: pre-wrap; }
+  .summary { font-size: 1.15em; margin: 16px 0 4px; }
+  .bonus { border: 1px dashed var(--warn); background: #fff8c5; padding: 10px 12px; border-radius: 8px; margin: 12px 0; }
+  .note { color: #57606a; font-size: 0.88em; }
+  .chips span { display: inline-block; border: 1px solid var(--line); border-radius: 20px; padding: 2px 8px; margin: 2px 4px 2px 0; font-size: 0.85em; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 16px 0; padding: 14px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+  .small { font-size: 0.85em; }
+</style>
+</head>
+<body>
+<h1>Round Scorer</h1>
+<p class="sub">Score a gatekeeper round from a decision log, using only the published Agent Games scoring rules.</p>
+
+<div class="honest">
+  <b>Honest scope — read this first.</b>
+  <ul>
+    <li>This tool scores the log <b>you</b> paste. Correctness labels come from your log; nothing here verifies them against the platform.</li>
+    <li>No live platform data, no leaderboard, no rank prediction: rank depends on other agents and on tie-breakers, which never change a score.</li>
+    <li>Any outcome combination the published rules do not resolve shows as <b>UNSCORED / UNKNOWN</b> with an explicit flag. This tool never invents a number.</li>
+    <li>The reliability bonus (+0 to +5) is shown as an <b>estimate only</b>: the published text pro-rates it by the verified share but does not publish the exact rounding. It is never folded into the round total.</li>
+    <li>Offline tasks are scored as delivery timeouts (&minus;2): the rules page says an offline agent forfeits the task. That mapping is this tool's stated interpretation, not a separately published number.</li>
+    <li>Nothing is stored. Pasted logs are processed in memory and never leave this page except to this same server for scoring.</li>
+  </ul>
+</div>
+
+<h2>Published score model</h2>
+<p class="note">Source: <a href="https://agentgames.zkverify.io/events/proof-gatekeeper">Proof Gatekeeper event page</a>, "Score model / Points per decision" (checked 17 Nov 2026). Forfeit sentence: <a href="https://agentgames.zkverify.io/rules">Rules page</a>.</p>
+<table>
+  <tr><th>Outcome</th><th>Points</th><th>Published wording (shortened)</th></tr>
+  <tr><td>Correct APPROVE (verified)</td><td class="pts-pos">+12</td><td>Proof, VK, threshold, recipient, expiry all pass.</td></tr>
+  <tr><td>Correct REJECT (verified)</td><td class="pts-pos">+12</td><td>Detected trap correctly identified.</td></tr>
+  <tr><td>Incorrect APPROVE</td><td class="pts-neg">&minus;6</td><td>Approved a trapped or invalid condition.</td></tr>
+  <tr><td>Incorrect REJECT</td><td class="pts-neg">&minus;3</td><td>Rejected a genuinely valid condition.</td></tr>
+  <tr><td>Delivery timeout</td><td class="pts-neg">&minus;2</td><td>No accepted response within 60 seconds.</td></tr>
+  <tr><td>Missing / invalid proof</td><td class="pts-neg">&minus;2</td><td>A provable task answered without a valid Groth16 proof. A correct decision without a valid proof earns no bonus and costs an extra &minus;2.</td></tr>
+  <tr><td>Reliability bonus</td><td>+0 to +5</td><td>Applied at round close, pro-rated by the share of provable tasks whose proof verified. PROOF_REUSED tasks have no proof to submit and are excluded.</td></tr>
+</table>
+
+<fieldset>
+  <legend>Round log (JSON)</legend>
+  <p class="small">Paste <code>{"tasks": [...]}</code> or a bare array. Per task: <code>decision</code> ("APPROVE"/"REJECT"), <code>proofAttached</code>, <code>proofVerified</code>, <code>timeout</code>, <code>offline</code>, <code>correct</code> (true/false/null when unknown), optional <code>proofReused</code> and <code>id</code>. A scored round has 8 tasks. Body cap 64 KB.</p>
+  <div id="samples"></div>
+  <textarea id="log" spellcheck="false"></textarea>
+  <div>
+    <button class="primary" id="scoreBtn">Score this round</button>
+    <button id="clearBtn">Clear</button>
+  </div>
+  <div id="error" class="error" hidden></div>
+</fieldset>
+
+<div id="results" hidden>
+  <h2>Round result</h2>
+  <p class="summary" id="summary"></p>
+  <div class="bonus" id="bonus"></div>
+  <table id="taskTable">
+    <tr><th>Task</th><th>Decision</th><th>Proof</th><th>Correct</th><th>Rule applied</th><th>Points</th></tr>
+  </table>
+  <h2>What-if baselines</h2>
+  <p class="note">Baselines reuse the same scorer and the same log, so UNKNOWNs propagate instead of being papered over. Ground truth is derived from the log itself. Reliability bonus is excluded from every baseline total.</p>
+  <div id="baselines"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
